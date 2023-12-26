@@ -1,0 +1,3 @@
+#!/bin/bash
+c="$HOME/$TARGET/$VIDLIB/$PHOTOLIB/catchall"
+fark.sh "$c/$1"

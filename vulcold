@@ -1,0 +1,9 @@
+#!/bin/bash
+sudo cryptsetup luksOpen /dev/sda3 vulcold
+sudo vgdisplay --short
+sudo lvs -o lv_name,lv_size -S vg_name=vgkubuntu
+sudo lvchange -ay vgkubuntu/root
+sudo mount /dev/vgkubuntu/root /mnt
+sudo mount /dev/nvme0n1p3 /mnt/boot
+sudo mount /dev/nvme0n1p2 /mnt/boot/efi
+for i in /dev /dev/pts /proc /sys /run; do sudo mount -B $i /mnt$i; done

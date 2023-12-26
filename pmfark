@@ -1,0 +1,2 @@
+#!/bin/bash
+fark.sh $HOME/$TARGET/$VIDLIB/$PHOTOLIB/m/pm/$1

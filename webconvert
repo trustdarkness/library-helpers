@@ -1,0 +1,18 @@
+#!/bin/bash
+ms1=ANMF
+ms2=ANIM
+for i in `ls *.webp`; do
+       grep -e $ms1 -e $ms2 $i	
+	if [ $? -ne 1 ]; then
+		mogrify -format gif $i
+	else
+		pngname=$(echo $i|sed s/webp/png/g)
+	    dwebp $i -o $pngname
+		if [ $? -eq 0 ]; then
+			mv $i /tmp/
+		else
+			echo "something went wrong with $i"
+			return 1
+		fi
+	fi
+done

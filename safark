@@ -1,0 +1,3 @@
+#!/bin/bash
+sa="$HOME/$TARGET/$VIDLIB/$PHOTOLIB/si/sa"
+fark "$sa/$1"

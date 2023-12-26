@@ -1,0 +1,3 @@
+#!/bin/bash
+si="$HOME/$TARGET/$VIDLIB/$PHOTOLIB/si"
+fark.sh "$si/$1"

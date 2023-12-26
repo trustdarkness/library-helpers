@@ -1,0 +1,3 @@
+#!/bin/bash
+dr="$HOME/$TARGET/$VIDLIB/$PHOTOLIB/si/dr"
+fark "$dr/$1"
