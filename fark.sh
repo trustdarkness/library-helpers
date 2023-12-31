@@ -43,6 +43,12 @@ audio=0
 if [ $# -eq 0 ]; then
   # no filepath supplied, try the clipboard
   fpath="`xclip -out`"
+  if [ $? -eq 0 ]; then
+    echo "Using $fpath found on the clipboard..."
+  else
+    >&2 printf "No filename provided and nothing on the clipboard.  Exiting."
+    exit 1;
+  fi
 elif [ $# -eq 2 ]; then
   if [ $1 == "-a" ]; then
     audio=1
@@ -63,10 +69,51 @@ if [ $? -eq 0 ]; then
 else
   isimage=0
 fi
+checkmusic="$(echo $fpath|grep $MUSICLIB);"
+if [ $? -eq 0 ]; then
+  ismusic=1
+else
+  ismusic=0
+fi
 if [ $isimage -ne 0 ]; then
   apath=$HOME/$TARGET/$VIDLIB/$PHOTOLIB/archive
+elif [ $ismusic -ne 0 ]; then
+  ctr=1
+  IFS=$'\n' 
+  for pathel in $(echo $fpath|tr "/" "\n"); do
+    echo "$ctr: $pathel"
+    if stringContains "Music" $pathel; then
+      # this is the heirarchy if its a single song
+      base=ctr
+      ((artist_idx=ctr+1))
+      ((album_idx=ctr+2))
+      ((song_idx=ctr+3))
+      echo "base: $base ar: $artist_idx al: $album_index s: $song_idx"
+    fi
+    if stringContains ".mp3" "$pathel"; then
+      # we assume this is the song itself
+      songname="$pathel"
+    fi
+    if [[ $ctr -eq $artist_idx && -z "${songname+x}" ]]; then 
+      artistname="$pathel"
+    elif [[ $ctr -eq $album_idx && -z "${songname+x}" ]]; then
+      albumname="$pathel"
+    fi
+    lastpathel=$pathel
+    ((ctr=$ctr+1))
+  done
+  apath=$MARCH
+  if ! [ -z "${artistname+x}" ]; then
+    apath=$apath"/"$artistname
+  fi
+  if ! [ -z "${albumname+x}" ]; then
+    if ! [ -z "${songname+x}" ]; then
+      apath=$apath"/"$albumname
+    fi
+  fi 
+
 else
-  checktarget=`echo $fpath|grep $TARGET`
+  checktarget=`echo $fpath|grep local`
   if [ $? -ne 0 ]; then
     fpath=$(echo $fpath|sed -e "s/local/$(whoami)\/$TARGET\/$VIDLIB/g");
     apath=$(echo $apath|sed -e "s/local/$(whoami)\/$TARGET\/$VIDLIB/g");
@@ -81,21 +128,37 @@ fi
 if [ $audio -eq 1 ]; then
   apath=$apath/audio
 fi 
-echo "Archiving $fpath"
+echo "Archiving $fpath to $apath"
 confirm_yes "Do you want to proceed? "
 mounted=$(mountpoint $HOME/$TARGET);
 if [ $? -ne 0 ]; then
   $(sshfs $TARGET:/ $HOME/$TARGET)
 fi
-cp "$fpath" "$apath"
+mkdir -p "$apath"
+if ! [ $? -eq 0 ]; then
+  >&2 printf "Couldnt mkdir -p $apath, exiting."
+  exit 1;
+fi
+cp -r "$fpath" "$apath"
 if [ $? -eq 0 ]; then
-  rm -f "$fpath"
+  rm -rf "$fpath"
   echo "Archived to $apath... syncing"
-  synced="rsync -rltuv --delete $HOME/$TARGET/$VIDLIB/$PHOTOLIB $HOME/Pictures/"
-  if [ $? -eq 0 ]; then
-    echo "done"
+  if [ $ismusic -ne 0 ]; then
+    for pathel in $(echo $MBKS| tr ":" "\n"); do
+      synced="$(rsync -rlutv --delete $MUSICLIB $pathel);"
+      if [ $? -eq 0 ]; then
+        echo "Synced $pathel"
+      else
+        echo "Something went wrong syncing $pathel"
+      fi
+    done;
   else
-    echo "something went wrong during sync"
+    synced="$(rsync -rltuv --delete $HOME/$TARGET/$VIDLIB/$PHOTOLIB $HOME/Pictures/);"
+    if [ $? -eq 0 ]; then
+      echo "done"
+    else
+      echo "something went wrong during sync"
+    fi
   fi
 else
   echo "something went wrong during archive"
