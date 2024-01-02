@@ -36,9 +36,6 @@ function confirm_yes {
   get_yes_keypress "$prompt" 0
 }
 
-# by default we'll assume its an archive we don't care about
-# but -a should indicate maybe just the audio needs fixing
-audio=0
 
 if [ $# -eq 0 ]; then
   # no filepath supplied, try the clipboard
@@ -50,10 +47,10 @@ if [ $# -eq 0 ]; then
     exit 1;
   fi
 elif [ $# -eq 2 ]; then
-  if [ $1 == "-a" ]; then
-    audio=1
+  if [ $1 == "-y" ]; then
+    noninteractive=1
   else
-    echo "The only option is -a, I couldn't parse your input."
+    echo "The only option is -y, I couldn't parse your input."
   fi
   fpath="$2"
 else
@@ -125,11 +122,11 @@ else
     apath="$HOME/$TARGET/$VIDLIB/$VIDLIB/ARCHIVE"
   fi
 fi
-if [ $audio -eq 1 ]; then
-  apath=$apath/audio
-fi 
+
 echo "Archiving $fpath to $apath"
-confirm_yes "Do you want to proceed? "
+if [ -z ${noninteractive+x } ]; then 
+  confirm_yes "Do you want to proceed? "
+fi
 mounted=$(mountpoint $HOME/$TARGET);
 if [ $? -ne 0 ]; then
   $(sshfs $TARGET:/ $HOME/$TARGET)
@@ -162,4 +159,7 @@ if [ $? -eq 0 ]; then
   fi
 else
   echo "something went wrong during archive"
+fi
+if ! [ -z ${noninteractive+x } ]; then 
+  sleep 5
 fi
