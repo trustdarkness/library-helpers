@@ -1,0 +1,14 @@
+[Desktop Entry]
+# this is intended to be used as a geeqie plugin
+# https://www.geeqie.org/
+
+Version=1.0
+Type=Application
+Name[en_GB]=fark
+Name=fark
+
+Categories=X-Geeqie;
+OnlyShowIn=X-Geeqie;
+Exec=konsole -e /home/mt/bin/fark -y %f
+
+Icon=geeqie
