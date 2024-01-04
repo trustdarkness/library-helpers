@@ -78,7 +78,6 @@ elif [ $ismusic -ne 0 ]; then
   ctr=1
   IFS=$'\n' 
   for pathel in $(echo $fpath|tr "/" "\n"); do
-    echo "$ctr: $pathel"
     if stringContains "Music" $pathel; then
       # this is the heirarchy if its a single song
       base=ctr
@@ -101,7 +100,12 @@ elif [ $ismusic -ne 0 ]; then
   done
   apath=$MARCH
   if ! [ -z "${artistname+x}" ]; then
-    apath=$apath"/"$artistname
+    if [ -z "${albumname+x}" ]; then
+      # skipping the negation and reassigning here mostly for readability
+      apath=$MARCH
+    else
+      apath=$apath"/"$artistname
+    fi
   fi
   if ! [ -z "${albumname+x}" ]; then
     if ! [ -z "${songname+x}" ]; then
@@ -111,15 +115,17 @@ elif [ $ismusic -ne 0 ]; then
 
 else
   checktarget=`echo $fpath|grep local`
-  if [ $? -ne 0 ]; then
+  if stringContains "local" $fpath; then
+    echo "modifying local path"
     fpath=$(echo $fpath|sed -e "s/local/$(whoami)\/$TARGET\/$VIDLIB/g");
-    apath=$(echo $apath|sed -e "s/local/$(whoami)\/$TARGET\/$VIDLIB/g");
-  fi
-  ispno=$(echo "$fpath"|grep pno);
-  if [ $? -eq 0 ]; then 
-    apath="$HOME/$TARGET/$VIDLIB/$VIDLIB/pno-video/archive"
+    apath="$HOME/$TARGET/$VIDLIB/$VIDLIB/ARCHIVE/"
   else
-    apath="$HOME/$TARGET/$VIDLIB/$VIDLIB/ARCHIVE"
+    ispno=$(echo "$fpath"|grep pno);
+    if [ $? -eq 0 ]; then 
+      apath="$HOME/$TARGET/$VIDLIB/$VIDLIB/pno-video/archive"
+    else
+      apath="$HOME/$TARGET/$VIDLIB/$VIDLIB/ARCHIVE"
+    fi
   fi
 fi
 
