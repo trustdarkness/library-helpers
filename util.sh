@@ -22,6 +22,8 @@
 # it down or come to some other acceptable compromise with you.
 # I make no money from any of this, its only for my personal use
 # in my home.
+#
+# May have dependencies on dots/.bashrc and dots/.bash_profile
 
 
 # Read a single char from /dev/tty, prompting with "$*"
@@ -69,13 +71,6 @@ function stringContains() {
         return $?;
 }
 export -f stringContains
-
-function wwwify () {
-	sudo sed -i.bak '/www-data/ s#/usr/sbin/nologin#/bin/bash#' /etc/passwd;
-	sudo -i -u www-data $@;
-	sudo sed -i.bak '/www-data/ s#/bin/bash#/usr/sbin/nologin#' /etc/passwd
-}
-export wwwify
 
 function sync_music () {
     for pathel in $(echo $MBKS| tr ":" "\n"); do
@@ -143,6 +138,76 @@ function audio_boost () {
 }
 export -f audio_boost
 
+function vtrim() {
+  ltrim=0
+  rtrim=0
+  POSITIONAL_ARGS=()
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      -l|--left-trim)
+        ltrim=$2
+        shift # past argument
+        shift # past value
+        ;;
+      -r|--right-trim)
+        rtrim=$2
+        shift # past argument
+        shift # past value
+        ;;
+      -h|--help)
+        echo "This is a simple wrapper to trim video files of leading"
+        echo "or trailing content."
+        echo ""
+        echo "-l, --left-trim \$secs -- trim the beginning of the video by X secs"
+        echo "-r, --right-trim \$secs -- trim the end of the video by X secs."
+        echo "-h, --help -- this friendly help text."
+        shift # past argument
+        shift # past value
+        ;;
+      -*|--*)
+        echo "Unknown option $1"
+        return 1
+        ;;
+      *)
+        POSITIONAL_ARGS+=("$1") # save positional arg
+        shift # past argument
+        ;;
+    esac
+  done
+  set -- "${POSITIONAL_ARGS[@]}" # restore positional parameters
+
+  if [ $# -eq 0 ]; then
+  # no filepath supplied, try the clipboard
+    filename="`xclip -out`"
+  else
+    filename="$1"  
+  fi
+  echo "Using yt-dlp to download $url..."
+  if [ $ltrim -ne 0 ]; then
+    echo "trimming $ltrim seconds from the beginning of the downloaded video."
+    echo "(moving original to /tmp)"
+    bn=$(basename $filename)
+    mv $filename /tmp/
+    attempt=$(ffmpeg -i /tmp/$bn -ss $ltrim -acodec copy $filename|pv)
+    if ! [ $? -eq 0 ]; then
+      >&2 printf "Something went wrong trying to left trim $filename. exiting.\n"
+      return 1
+    fi
+  fi
+  if [ $rtrim -ne 0 ]; then
+    echo "trimming $rtrim seconds from the end of the downloaded video."
+    echo "(moving original to /tmp)"
+    bn=$(basename $filename)
+    mv $filename /tmp/
+    attempt=$(ffmpeg -i /tmp/$bn -t $rtrim -vcodec libx264 0 -acodec copy $filename|pv)
+    if ! [ $? -eq 0 ]; then
+      >&2 printf "Something went wrong trying to left trim $filename. exiting.\n"
+      return 1
+    fi
+  fi
+}
+export -f vtrim
+
 # Some wrappers around the wonderful yt-dlp... an alias just to capture the 
 # options I like to use but don't love to type.
 function ytd () { 
@@ -179,7 +244,7 @@ function yt () {
         shift # past value
         ;;
       -r|--right-trim)
-        RTRIMSECS=$2
+        rtrim=$2
         shift # past argument
         shift # past value
         ;;
@@ -237,24 +302,10 @@ function yt () {
     fi
   fi
   if [ $ltrim -ne 0 ]; then
-    echo "trimming $ltrim seconds from the beginning of the downloaded video."
-    echo "(moving original to /tmp)"
-    mv $filename /tmp/
-    attempt=$(ffmpeg -i /tmp/$filename -ss $ltrim -acodec copy $filename|pv)
-    if ! [ $? -eq 0 ]; then
-      >&2 printf "Something went wrong trying to left trim $filename. exiting.\n"
-      return 1
-    fi
+    vtrim -l $ltrim $filename
   fi
   if [ $rtrim -ne 0 ]; then
-    echo "trimming $rtrim seconds from the end of the downloaded video."
-    echo "(moving original to /tmp)"
-    mv $filename /tmp/
-    attempt=$(ffmpeg -i /tmp/$filename -t $rtrim -vcodec libx264 0 -acodec copy $filename|pv)
-    if ! [ $? -eq 0 ]; then
-      >&2 printf "Something went wrong trying to left trim $filename. exiting.\n"
-      return 1
-    fi
+    vtrim -r $rtrim $filename
   fi
   echo "Saved to $filename."
 }
