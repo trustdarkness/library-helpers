@@ -1,41 +1,5 @@
 #!/bin/bash
 #
-#
-# Read a single char from /dev/tty, prompting with "$*"
-# Note: pressing enter will return a null string. Perhaps a version terminated with X and then remove it in caller?
-# See https://unix.stackexchange.com/a/367880/143394 for dealing with multi-byte, etc.
-function get_keypress {
-  local REPLY IFS=
-  >/dev/tty printf '%s' "$*"
-  [[ $ZSH_VERSION ]] && read -rk1  # Use -u0 to read from STDIN
-  # See https://unix.stackexchange.com/q/383197/143394 regarding '\n' -> ''
-  [[ $BASH_VERSION ]] && </dev/tty read -rn1
-  printf '%s' "$REPLY"
-}
-# Get a y/n from the user, return yes=0, no=1 enter=$2
-# Prompt using $1.
-# If set, return $2 on pressing enter, useful for cancel or defualting
-function get_yes_keypress {
-  local prompt="${1:-Are you sure}"
-  local enter_return=$2
-  local REPLY
-  # [[ ! $prompt ]] && prompt="[y/n]? "
-  while REPLY=$(get_keypress "$prompt"); do
-    [[ $REPLY ]] && printf '\n' # $REPLY blank if user presses enter
-    case "$REPLY" in
-      Y|y)  return 0;;
-      N|n)  return 1;;
-      '')   [[ $enter_return ]] && return "$enter_return"
-    esac
-  done
-}
-
-# Prompt to confirm, defaulting to YES on <enter>
-function confirm_yes {
-  local prompt="${*:-Are you sure} [Y/n]? "
-  get_yes_keypress "$prompt" 0
-}
-
 
 if [ $# -eq 0 ]; then
   # no filepath supplied, try the clipboard
@@ -84,7 +48,6 @@ elif [ $ismusic -ne 0 ]; then
       ((artist_idx=ctr+1))
       ((album_idx=ctr+2))
       ((song_idx=ctr+3))
-      echo "base: $base ar: $artist_idx al: $album_index s: $song_idx"
     fi
     if stringContains ".mp3" "$pathel"; then
       # we assume this is the song itself
@@ -116,7 +79,6 @@ elif [ $ismusic -ne 0 ]; then
 else
   checktarget=`echo $fpath|grep local`
   if stringContains "local" $fpath; then
-    echo "modifying local path"
     fpath=$(echo $fpath|sed -e "s/local/$(whoami)\/$TARGET\/$VIDLIB/g");
     apath="$HOME/$TARGET/$VIDLIB/$VIDLIB/ARCHIVE/"
   else
@@ -147,14 +109,7 @@ if [ $? -eq 0 ]; then
   rm -rf "$fpath"
   echo "Archived to $apath... syncing"
   if [ $ismusic -ne 0 ]; then
-    for pathel in $(echo $MBKS| tr ":" "\n"); do
-      synced="$(rsync -rlutv --delete $MUSICLIB $pathel);"
-      if [ $? -eq 0 ]; then
-        echo "Synced $pathel"
-      else
-        echo "Something went wrong syncing $pathel"
-      fi
-    done;
+    sync_music
   else
     synced="$(rsync -rltuv --delete $HOME/$TARGET/$VIDLIB/$PHOTOLIB $HOME/Pictures/);"
     if [ $? -eq 0 ]; then
@@ -164,6 +119,12 @@ if [ $? -eq 0 ]; then
     fi
   fi
 else
+  bn=$(basename "$fpath")
+  farked="$apath"/"$bn"
+  if [ -f "$farked" ]; then
+    >&2  printf "$bn was previously archived and exists at $apath. exiting.\n"
+    exit 1
+  fi
   echo "something went wrong during archive"
 fi
 if ! [ -z ${noninteractive+x } ]; then 
