@@ -101,7 +101,7 @@ function audio_boost () {
         file="${1#*=}"
         ;;
       --help|-h)
-        printf "Boosts the audio of a video file by \$DB db (default 50)" # Flag argument
+        printf "Boosts the audio of a video file by \$DB db (default 20)" # Flag argument
         printf "File supplied by -f, OR only arg on the command line OR clipboad."
         printf "Amplitude boost can be overridden with -d or --decibels."
         exit 0
@@ -121,7 +121,7 @@ function audio_boost () {
   # not all of these will be used, but chopping it explicitly for
   # readability, because my brain cannot be trusted.
   if [ $db -eq  0 ]; then
-    db=50
+    db=20
   fi
   bn=$(basename "$file");
   path=$(dirname "$file");
@@ -221,6 +221,23 @@ function ytd () {
   $@
 }
 export -f ytd
+
+function ytm () {
+  /usr/local/bin/yt-dlp \
+    -x \
+    --audio-format mp3 \
+    $@
+}
+export -f ytm
+
+function ytmp () {
+  /usr/local/bin/yt-dlp \
+    --yes-playlist \
+    -x \
+    --audio-format mp3 \
+    $@
+}
+export -f ytmp                                                                      
 
 # And some things to help handle input and optionally boost the 
 # audio after pulling the video down. 
