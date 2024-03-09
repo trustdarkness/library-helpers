@@ -21,10 +21,10 @@ else
   fpath="$1"
 fi
  
-fpath="$(echo \"$fpath\"|xargs|awk '{$1=$1};1')"
-prestrip=$(echo $fpath| grep "file://");
+#fpath="$(echo \"$fpath\"|xargs|awk '{"$1"="$1"};1')"
+prestrip="$(echo $fpath| grep 'file://')";
 if [ $? -eq 0 ]; then
-  fpath=$(echo $fpath|cut -d":" -f2|cut -b3-);
+  fpath="$(echo $fpath|cut -d':' -f2|cut -b3-)"
 fi
 
 checkimage="`echo $fpath|grep $PHOTOLIB`"
@@ -40,7 +40,7 @@ else
   ismusic=0
 fi
 if [ $isimage -ne 0 ]; then
-  apath=$HOME/$TARGET/$VIDLIB/$PHOTOLIB/archive
+  apath="$HOME/$TARGET/$VIDLIB/$PHOTOLIB/archive"
 elif [ $ismusic -ne 0 ]; then
   ctr=1
   IFS=$'\n' 
@@ -82,7 +82,8 @@ elif [ $ismusic -ne 0 ]; then
 else
   checktarget=`echo $fpath|grep local`
   if stringContains "local" "$fpath"; then
-    fpath="$(echo $fpath|sed -e \"s/local/$(whoami)\/$TARGET\/$VIDLIB/g\")";
+    sedstring="s/local/$(whoami)\/$TARGET\/$VIDLIB/g"
+    fpath="$(echo $fpath|sed -e $sedstring)";
     apath="$HOME/$TARGET/$VIDLIB/$VIDLIB/ARCHIVE/"
   else
     ispno=$(echo "$fpath"|grep pno);
