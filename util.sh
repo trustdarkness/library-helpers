@@ -127,7 +127,7 @@ function audio_boost () {
   path=$(dirname "$file");
   db_string="$db"dB
   mv "$file" /tmp
-  boost=$(ffmpeg -i "/tmp/$bn" -vcodec copy -af "volume=$db_string" $file)
+  boost=$(ffmpeg -i "/tmp/$bn" -vcodec copy -af "volume=$db_string" "$file")
   if [ $? -eq 0 ]; then
     echo "Boosted $bn by $db db, saved  in $path.  Check the original in /tmp"
     echo "before rebooting if you think there were any re-encoding problems."
