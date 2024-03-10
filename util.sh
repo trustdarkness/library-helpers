@@ -84,10 +84,19 @@ function sync_music () {
 }
 export -f sync_music
 
+function untriage() {
+  if [ -n $2 ]; then
+    to=$2
+  else 
+    to=$(pwd)
+  mv $VIDTRIAGE/$1 $to
+}
+complete -F untriage $VIDTRIAGE
+
 #
 # tiny helper wrapper around ffmpeg to boost the amplitude of a video file
 #
-function audio_boost () {
+function audio-boost () {
   # handle args ()
   db=0
   while [ $# -gt 0 ]; do
@@ -136,7 +145,8 @@ function audio_boost () {
     return 1;
   fi
 }
-export -f audio_boost
+complete -F audio-boost $VIDTRIAGE
+
 
 function vtrim() {
   ltrim=0
@@ -312,7 +322,7 @@ function yt () {
 
   if [ $DB -ne 0 ]; then
     echo "trying to boost audio on $out by 50dB,"
-    attempt=$(audio_boost "$filename");
+    attempt=$(audio-boost "$filename");
     if ! [ $? -eq 0 ]; then
       >&2 printf "Something went wrong trying to boost the audio of $filename. Exiting.\n"
       return 1
