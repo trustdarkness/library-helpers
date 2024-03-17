@@ -26,7 +26,7 @@ prestrip="$(echo $fpath| grep 'file://')";
 if [ $? -eq 0 ]; then
   fpath="$(echo $fpath|cut -d':' -f2|cut -b3-)"
 fi
-
+filename=$(basename "$fpath")
 checkimage="`echo $fpath|grep $PHOTOLIB`"
 if [ $? -eq 0 ]; then
   isimage=1
@@ -80,9 +80,12 @@ elif [ $ismusic -ne 0 ]; then
   fi 
 
 else
-  checktarget=`echo $fpath|grep local`
   if stringContains "local" "$fpath"; then
-    sedstring="s/local/$(whoami)\/$TARGET\/$VIDLIB/g"
+    if stringContains "$VIDTRIAGE" "$fpath"; then
+      sedstring="s/\/home\/local\/$TARGET//g"
+    else
+      sedstring="s/local/$(whoami)\/$TARGET\/$VIDLIB/g"
+    fi
     fpath="$(echo $fpath|sed -e $sedstring)";
     apath="$HOME/$TARGET/$VIDLIB/$VIDLIB/ARCHIVE/"
   else

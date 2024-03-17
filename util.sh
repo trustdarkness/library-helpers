@@ -85,13 +85,14 @@ function sync_music () {
 export -f sync_music
 
 function untriage() {
-  if [ -n $2 ]; then
-    to=$2
+  if [ -n "$2" ]; then
+    to="$2"
   else 
-    to=$(pwd)
-  mv $VIDTRIAGE/$1 $to
+    to="$(pwd)"
+  fi
+  mv "$VIDTRIAGE/$1" "$to"
 }
-complete -F untriage $VIDTRIAGE
+complete -F untriage "$VIDTRIAGE"
 
 #
 # tiny helper wrapper around ffmpeg to boost the amplitude of a video file
@@ -145,7 +146,7 @@ function audio-boost () {
     return 1;
   fi
 }
-complete -F audio-boost $VIDTRIAGE
+complete -F audio-boost "$VIDTRIAGE"
 
 
 function vtrim() {
@@ -192,13 +193,12 @@ function vtrim() {
   else
     filename="$1"  
   fi
-  echo "Using yt-dlp to download $url..."
   if [ $ltrim -ne 0 ]; then
-    echo "trimming $ltrim seconds from the beginning of the downloaded video."
+    echo "trimming $ltrim seconds from the beginning of $filename."
     echo "(moving original to /tmp)"
-    bn=$(basename $filename)
-    mv $filename /tmp/
-    attempt=$(ffmpeg -i /tmp/$bn -ss $ltrim -acodec copy $filename|pv)
+    dir="$(pwd)"
+    mv "$filename" /tmp/
+    attempt=$(ffmpeg -i "/tmp/$filename" -ss $ltrim -acodec copy "$dir/$filename"|pv)
     if ! [ $? -eq 0 ]; then
       >&2 printf "Something went wrong trying to left trim $filename. exiting.\n"
       return 1
@@ -207,9 +207,9 @@ function vtrim() {
   if [ $rtrim -ne 0 ]; then
     echo "trimming $rtrim seconds from the end of the downloaded video."
     echo "(moving original to /tmp)"
-    bn=$(basename $filename)
-    mv $filename /tmp/
-    attempt=$(ffmpeg -i /tmp/$bn -t $rtrim -vcodec libx264 0 -acodec copy $filename|pv)
+    dir="$(pwd)"
+    mv "$filename" /tmp/
+    attempt=$(ffmpeg -i "/tmp/$filename" -t $rtrim -vcodec libx264 0 -acodec copy "$dir/$filename"|pv)
     if ! [ $? -eq 0 ]; then
       >&2 printf "Something went wrong trying to left trim $filename. exiting.\n"
       return 1
