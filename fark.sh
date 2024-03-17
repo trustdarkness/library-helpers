@@ -81,7 +81,7 @@ elif [ $ismusic -ne 0 ]; then
 
 else
   if stringContains "local" "$fpath"; then
-    if stringContains "$VIDTRIAGE" "$fpath"; then
+    if stringContains "$VIDLIB" "$fpath"; then
       sedstring="s/\/home\/local\/$TARGET//g"
     else
       sedstring="s/local/$(whoami)\/$TARGET\/$VIDLIB/g"
@@ -98,6 +98,11 @@ else
   fi
 fi
 
+# the path coming from jq over the wire ends up double quoted
+if stringContains '"' $fpath; then 
+  sedstring='s/"//g'
+  fpath="$(echo $fpath|sed -e $sedstring)"
+fi
 echo "Archiving $fpath to $apath"
 if [ -z ${noninteractive+x } ]; then 
   confirm_yes "Do you want to proceed? "

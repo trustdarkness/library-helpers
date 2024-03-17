@@ -84,6 +84,65 @@ function sync_music () {
 }
 export -f sync_music
 
+# rmfark should run properly when run from the player
+# host as well as from a remote host.  If this is the player
+# host, we simplify.
+function rmfark_local() {
+  SOCK="/tmp/mpvsocket"
+  chckopencmd="lsof -c mpv|grep $SOCK|grep LISTEN"
+  chckopen=$($chkopencmd)
+  if [[ $? -gt 0 ]]; then
+    >&2 printf "mpv not listening on $SOCK."
+    >&2 printf "make sure it was started with"
+    >&2 printf "--input-ipc-server=/tmp/mpvsocket"
+    return 1
+  fi
+  filepath="$(echo '{ "command": ["get_property", "path"] }' | socat - $SOCK|jq .data)"
+  fark "$filepath"
+}
+
+# Run fark remotely to archive the currently playing video.
+# 
+# $TARGET defines the backup host.
+# $1 is the player host to get the currently playing video 
+#     from.  currently requires player app on player host
+#     to be an mpv based player configure to run mpv with
+#     --input-ipc-server=/tmp/mpvsocket. Defaults to
+#     $DEFAULT_PLAYER. Host access relies on ssh keys. 
+function rmfark() {
+  SOCK="/tmp/mpvsocket"
+  MPV_CMD="get_property"
+  MPV_CMD_ARG="path"
+  IPC_JSON="{ \"command\": [\"$MPV_CMD\", \"$MPV_CMD_ARG\"] }"
+  REMOTE_CMD="echo '"$IPC_JSON"'|socat - $SOCK|jq .data"
+  if [ -n "$1" ]; then 
+    PLAYER=$1
+  else
+    PLAYER=$DEFAULT_PLAYER
+  fi
+  chk_cmd="lsof -c mpv|grep $SOCK|grep LISTEN"
+  env_chk="ssh $PLAYER $chk_cmd"
+  env_ok=$($env_chk)
+  if [ $? -gt 0 ]; then
+    >&2 printf "$env_chk failed.\n"
+    >&2 printf "1. Check that you can ssh to $PLAYER\n"
+    >&2 printf "   (name exists in ~/.ssh/config, ssh keys are distributed,\n"
+    >&2 printf "    and ssh-agent is running).\n"
+    >&2 printf "2. Check that the player app on $PLAYER\n"
+    >&2 printf "    is running mpv with --input-ipc-server=/tmp/mpvsocket.\n"
+    return 1
+  fi
+  echo "Running $REMOTE_CMD on $PLAYER"
+  r_cmd="ssh $PLAYER $REMOTE_CMD"
+  filepath=$($r_cmd)
+  if [ $? -gt 0 ]; then
+    >&2 printf "Non-zero exit status for:\n"
+    >&2 printf "$r_cmd"
+    return 1
+  fi
+  fark $filepath
+}
+
 function untriage() {
   if [ -n "$2" ]; then
     to="$2"
