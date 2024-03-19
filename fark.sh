@@ -11,7 +11,7 @@ if [ $# -eq 0 ]; then
     exit 1;
   fi
 elif [ $# -eq 2 ]; then
-  if [ $1 == "-y" ]; then
+  if [[ $1 == "-y" ]]; then
     noninteractive=1
   else
     echo "The only option is -y, I couldn't parse your input."

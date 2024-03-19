@@ -84,21 +84,31 @@ function sync_music () {
 }
 export -f sync_music
 
+# global options to interact with mpv via unix sockets when started with
+# --input-ipc-server=/tmp/mpvsocket
+# setting up for archiving playing file as wrapper functions around fark
+# TODO: allow for more generic player interaction locally and remotely
+SOCK="/tmp/mpvsocket"
+MPV_SOCK_OPEN="lsof -c mpv|grep $SOCK|grep LISTEN"
+MPV_GET_PROP="get_property"
+MPV_PATH_PROP="path"
+PLAYING_FILE_IPC_JSON="{ \"command\": [\"$MPV_GET_PROP\", \"$MPV_PATH_PROP\"] }"
+MPV_SOCK_CMD="echo '"$PLAYING_FILE_IPC_JSON"'|socat - $SOCK|jq .data"
+
 # rmfark should run properly when run from the player
 # host as well as from a remote host.  If this is the player
 # host, we simplify.
 function rmfark_local() {
   SOCK="/tmp/mpvsocket"
-  chckopencmd="lsof -c mpv|grep $SOCK|grep LISTEN"
-  chckopen=$($chkopencmd)
+  chckopen=$($MPV_SOCK_OPEN)
   if [[ $? -gt 0 ]]; then
     >&2 printf "mpv not listening on $SOCK."
     >&2 printf "make sure it was started with"
     >&2 printf "--input-ipc-server=/tmp/mpvsocket"
     return 1
   fi
-  filepath="$(echo '{ "command": ["get_property", "path"] }' | socat - $SOCK|jq .data)"
-  fark "$filepath"
+  filepath="$($MPV_SOCK_CMD)"
+  fark $filepath
 }
 
 # Run fark remotely to archive the currently playing video.
@@ -110,21 +120,23 @@ function rmfark_local() {
 #     --input-ipc-server=/tmp/mpvsocket. Defaults to
 #     $DEFAULT_PLAYER. Host access relies on ssh keys. 
 function rmfark() {
-  SOCK="/tmp/mpvsocket"
-  MPV_CMD="get_property"
-  MPV_CMD_ARG="path"
-  IPC_JSON="{ \"command\": [\"$MPV_CMD\", \"$MPV_CMD_ARG\"] }"
-  REMOTE_CMD="echo '"$IPC_JSON"'|socat - $SOCK|jq .data"
   if [ -n "$1" ]; then 
     PLAYER=$1
   else
     PLAYER=$DEFAULT_PLAYER
   fi
-  chk_cmd="lsof -c mpv|grep $SOCK|grep LISTEN"
-  env_chk="ssh $PLAYER $chk_cmd"
+  if [[ "$PLAYER" == "$(hostname)" ]]; then 
+    run=$(rmfark_local)
+    if [ $? -gt 0 ]; then
+      >&2 printf "rmfark_local failed"
+      return 1
+    fi
+    return 0
+  fi
+  env_chk="ssh $PLAYER $MPV_SOCK_OPEN"
   env_ok=$($env_chk)
   if [ $? -gt 0 ]; then
-    >&2 printf "$env_chk failed.\n"
+    >&2 printf "$MPV_SOCK_OPEN failed.\n"
     >&2 printf "1. Check that you can ssh to $PLAYER\n"
     >&2 printf "   (name exists in ~/.ssh/config, ssh keys are distributed,\n"
     >&2 printf "    and ssh-agent is running).\n"
@@ -132,8 +144,8 @@ function rmfark() {
     >&2 printf "    is running mpv with --input-ipc-server=/tmp/mpvsocket.\n"
     return 1
   fi
-  echo "Running $REMOTE_CMD on $PLAYER"
-  r_cmd="ssh $PLAYER $REMOTE_CMD"
+  echo "Running $MPV_SOCK_CMD on $PLAYER"
+  r_cmd="ssh $PLAYER $MPV_SOCK_CMD"
   filepath=$($r_cmd)
   if [ $? -gt 0 ]; then
     >&2 printf "Non-zero exit status for:\n"
