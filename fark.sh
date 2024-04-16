@@ -1,5 +1,7 @@
 #!/bin/bash
 #
+source $HOME/.globals
+source $LH/util.sh
 
 if [ $# -eq 0 ]; then
   # no filepath supplied, try the clipboard
@@ -20,7 +22,7 @@ elif [ $# -eq 2 ]; then
 else
   fpath="$1"
 fi
- 
+echo "is there quotes? $fpath"
 #fpath="$(echo \"$fpath\"|xargs|awk '{"$1"="$1"};1')"
 prestrip="$(echo $fpath| grep 'file://')";
 if [ $? -eq 0 ]; then
@@ -45,14 +47,14 @@ elif [ $ismusic -ne 0 ]; then
   ctr=1
   IFS=$'\n' 
   for pathel in $(echo $fpath|tr "/" "\n"); do
-    if stringContains "Music" $pathel; then
+    if string_contains "Music" $pathel; then
       # this is the heirarchy if its a single song
       base=ctr
       ((artist_idx=ctr+1))
       ((album_idx=ctr+2))
       ((song_idx=ctr+3))
     fi
-    if stringContains ".mp3" "$pathel"; then
+    if string_contains ".mp3" "$pathel"; then
       # we assume this is the song itself
       songname="$pathel"
     fi
@@ -80,9 +82,9 @@ elif [ $ismusic -ne 0 ]; then
   fi 
 
 else
-  if stringContains "local" "$fpath"; then
-    if stringContains "$VIDLIB" "$fpath"; then
-      sedstring="s/\/home\/local\/$TARGET//g"
+  if string_contains "local" "$fpath"; then
+    if string_contains "$VIDLIB" "$fpath"; then
+      sedstring="s/\/home\/local/\/$VIDLIB/g"
     else
       sedstring="s/local/$(whoami)\/$TARGET\/$VIDLIB/g"
     fi
@@ -99,7 +101,7 @@ else
 fi
 
 # the path coming from jq over the wire ends up double quoted
-if stringContains '"' $fpath; then 
+if string_contains '"' $fpath; then 
   sedstring='s/"//g'
   fpath="$(echo $fpath|sed -e $sedstring)"
 fi

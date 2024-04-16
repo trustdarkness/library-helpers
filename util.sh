@@ -66,11 +66,11 @@ function confirm_yes {
 export -f confirm_yes
 
 # modification of https://stackoverflow.com/questions/229551/how-to-check-if-a-string-contains-a-substring-in-bash
-function stringContains() { 
+function string_contains() { 
         $(echo "$2"|grep -Eqi $1);
         return $?;
 }
-export -f stringContains
+export -f string_contains
 
 function sync_music () {
     for pathel in $(echo $MBKS| tr ":" "\n"); do
@@ -89,11 +89,14 @@ export -f sync_music
 # setting up for archiving playing file as wrapper functions around fark
 # TODO: allow for more generic player interaction locally and remotely
 SOCK="/tmp/mpvsocket"
-MPV_SOCK_OPEN="lsof -c mpv|grep $SOCK|grep LISTEN"
+MPV_SOCK_OPEN="lsof -c mpv|grep $SOCK"
 MPV_GET_PROP="get_property"
 MPV_PATH_PROP="path"
 PLAYING_FILE_IPC_JSON="{ \"command\": [\"$MPV_GET_PROP\", \"$MPV_PATH_PROP\"] }"
-MPV_SOCK_CMD="echo '"$PLAYING_FILE_IPC_JSON"'|socat - $SOCK|jq .data"
+NEXT_IPC_JSON="playlist-next"
+MPV_SOCK_CMD="echo '%s'|socat - $SOCK|jq .data"
+MPV_GET_PLAYING_FILE=$(printf "$MPV_SOCK_CMD" "${PLAYING_FILE_IPC_JSON}")
+MPV_NEXT=$(printf "$MPV_SOCK_CMD" "${NEXT_IPC_JSON}")
 
 # rmfark should run properly when run from the player
 # host as well as from a remote host.  If this is the player
@@ -107,8 +110,8 @@ function rmfark_local() {
     >&2 printf "--input-ipc-server=/tmp/mpvsocket"
     return 1
   fi
-  filepath="$($MPV_SOCK_CMD)"
-  fark $filepath
+  filepath="$($MPV_GET_PLAYING_FILE)"
+  fark "$filepath"
 }
 
 # Run fark remotely to archive the currently playing video.
@@ -126,7 +129,7 @@ function rmfark() {
     PLAYER=$DEFAULT_PLAYER
   fi
   if [[ "$PLAYER" == "$(hostname)" ]]; then 
-    run=$(rmfark_local)
+    run="$(rmfark_local)"
     if [ $? -gt 0 ]; then
       >&2 printf "rmfark_local failed"
       return 1
@@ -134,8 +137,10 @@ function rmfark() {
     return 0
   fi
   env_chk="ssh $PLAYER $MPV_SOCK_OPEN"
+  echo "running $env_chk on $PLAYER"
   env_ok=$($env_chk)
-  if [ $? -gt 0 ]; then
+  r=$?
+  if [ $r -gt 0 ]; then
     >&2 printf "$MPV_SOCK_OPEN failed.\n"
     >&2 printf "1. Check that you can ssh to $PLAYER\n"
     >&2 printf "   (name exists in ~/.ssh/config, ssh keys are distributed,\n"
@@ -144,15 +149,16 @@ function rmfark() {
     >&2 printf "    is running mpv with --input-ipc-server=/tmp/mpvsocket.\n"
     return 1
   fi
-  echo "Running $MPV_SOCK_CMD on $PLAYER"
-  r_cmd="ssh $PLAYER $MPV_SOCK_CMD"
-  filepath=$($r_cmd)
+  echo "Running $MPV_GET_PLAYING_FILE on $PLAYER"
+  r_cmd="ssh $PLAYER $MPV_GET_PLAYING_FILE"
+  filepath="$($r_cmd)"
   if [ $? -gt 0 ]; then
     >&2 printf "Non-zero exit status for:\n"
     >&2 printf "$r_cmd"
     return 1
   fi
-  fark $filepath
+  fark "$filepath"
+  r_cmd="ssh $PLAYER $MPV_NEXT"
 }
 
 function untriage() {
@@ -173,13 +179,13 @@ function audio-boost () {
   db=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      --decibels*|-d*)
-        if [[ "$1" != *=* ]]; then shift; fi # Value is next arg if no `=`
-        db=${1#*=}
+      --decibels|-d)
+        db=${2:-}
+        shift
         ;;
-      --file*|-f*)
-        if [[ "$1" != *=* ]]; then shift; fi
-        file="${1#*=}"
+      --file|-f)
+        file="${2:-}"
+        shift
         ;;
       --help|-h)
         printf "Boosts the audio of a video file by \$DB db (default 20)" # Flag argument
@@ -208,7 +214,10 @@ function audio-boost () {
   path=$(dirname "$file");
   db_string="$db"dB
   mv "$file" /tmp
-  boost=$(ffmpeg -i "/tmp/$bn" -vcodec copy -af "volume=$db_string" "$file")
+  bn=$(printf '%q' "$bn")
+  ffmpeg_cmd="ffmpeg -i /tmp/$bn -vcodec copy -af \"volume=$db_string\" $bn"
+  printf "running  $ffmpeg_cmd"
+  boost=$($ffmpeg_cmd)
   if [ $? -eq 0 ]; then
     echo "Boosted $bn by $db db, saved  in $path.  Check the original in /tmp"
     echo "before rebooting if you think there were any re-encoding problems."
