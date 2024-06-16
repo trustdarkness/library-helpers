@@ -26,44 +26,7 @@
 # May have dependencies on dots/.bashrc and dots/.bash_profile
 
 
-# Read a single char from /dev/tty, prompting with "$*"
-# Note: pressing enter will return a null string. Perhaps a version terminated with X and then remove it in caller?
-# See https://unix.stackexchange.com/a/367880/143394 for dealing with multi-byte, etc.
-function get_keypress {
-  local REPLY IFS=
-  >/dev/tty printf '%s' "$*"
-  [[ $ZSH_VERSION ]] && read -rk1  # Use -u0 to read from STDIN
-  # See https://unix.stackexchange.com/q/383197/143394 regarding '\n' -> ''
-  [[ $BASH_VERSION ]] && </dev/tty read -rn1
-  printf '%s' "$REPLY"
-}
-export -f get_keypress
-
-# Get a y/n from the user, return yes=0, no=1 enter=$2
-# Prompt using $1.
-# If set, return $2 on pressing enter, useful for cancel or defualting
-function get_yes_keypress {
-  local prompt="${1:-Are you sure}"
-  local enter_return=$2
-  local REPLY
-  # [[ ! $prompt ]] && prompt="[y/n]? "
-  while REPLY=$(get_keypress "$prompt"); do
-    [[ $REPLY ]] && printf '\n' # $REPLY blank if user presses enter
-    case "$REPLY" in
-      Y|y)  return 0;;
-      N|n)  return 1;;
-      '')   [[ $enter_return ]] && return "$enter_return"
-    esac
-  done
-}
-export -f get_yes_keypress
-
-# Prompt to confirm, defaulting to YES on <enter>
-function confirm_yes {
-  local prompt="${*:-Are you sure} [Y/n]? "
-  get_yes_keypress "$prompt" 0
-}
-export -f confirm_yes
+source $D/user_prompts.sh
 
 # modification of https://stackoverflow.com/questions/229551/how-to-check-if-a-string-contains-a-substring-in-bash
 function string_contains() { 
@@ -84,6 +47,32 @@ function sync_music () {
 }
 export -f sync_music
 
+sanitize_fpath() {
+  local fpath="${1:-}"
+  if ! [ -n "$fpath" ]; then 
+    >2 printf "no path. exiting."
+    return 1
+  fi
+  prestrip="$(echo $fpath| grep 'file://')";
+  if [ $? -eq 0 ]; then
+    fpath="$(echo $fpath|cut -d':' -f2|cut -b3-)"
+  fi
+  if string_contains "local" "$fpath"; then
+    if string_contains "$VIDLIB" "$fpath"; then
+      sedstring="s/\/home\/local/\/$VIDLIB/g"
+    else
+      sedstring="s/local/$(whoami)\/$TARGET\/$VIDLIB/g"
+    fi
+    fpath="$(echo $fpath|sed -e $sedstring)";
+  fi
+  # the path coming from jq over the wire ends up double quoted
+  if string_contains '"' $fpath; then 
+    sedstring='s/"//g'
+    fpath="$(echo $fpath|sed -e $sedstring)"
+  fi
+  echo "$fpath"
+}
+
 # global options to interact with mpv via unix sockets when started with
 # --input-ipc-server=/tmp/mpvsocket
 # setting up for archiving playing file as wrapper functions around fark
@@ -102,16 +91,18 @@ MPV_NEXT=$(printf "$MPV_SOCK_CMD" "${NEXT_IPC_JSON}")
 # host as well as from a remote host.  If this is the player
 # host, we simplify.
 function rmfark_local() {
-  SOCK="/tmp/mpvsocket"
-  chckopen=$($MPV_SOCK_OPEN)
+  lsof -c mpv|grep /tmp/mpvsocket
+
   if [[ $? -gt 0 ]]; then
-    >&2 printf "mpv not listening on $SOCK."
-    >&2 printf "make sure it was started with"
-    >&2 printf "--input-ipc-server=/tmp/mpvsocket"
+    >2 printf "mpv not listening on $SOCK."
+    >2 printf "make sure it was started with"
+    >2 printf "--input-ipc-server=/tmp/mpvsocket"
     return 1
   fi
-  filepath="$($MPV_GET_PLAYING_FILE)"
+  filepath=$(echo '"{ \"command\": [\"get_property\", \"path\"] }"'|socat - /tmp/mpvsocket|jq .data)
+  
   fark "$filepath"
+  return $? 
 }
 
 # Run fark remotely to archive the currently playing video.
@@ -122,7 +113,8 @@ function rmfark_local() {
 #     to be an mpv based player configure to run mpv with
 #     --input-ipc-server=/tmp/mpvsocket. Defaults to
 #     $DEFAULT_PLAYER. Host access relies on ssh keys. 
-function rmfark() {
+function rmfile() {
+  remote=false
   if [ -n "$1" ]; then 
     PLAYER=$1
   else
@@ -131,35 +123,45 @@ function rmfark() {
   if [[ "$PLAYER" == "$(hostname)" ]]; then 
     run="$(rmfark_local)"
     if [ $? -gt 0 ]; then
-      >&2 printf "rmfark_local failed"
+      >2 printf "rmfark_local failed"
       return 1
     fi
     return 0
   fi
   env_chk="ssh $PLAYER $MPV_SOCK_OPEN"
-  echo "running $env_chk on $PLAYER"
+  se "running $env_chk on $PLAYER"
   env_ok=$($env_chk)
   r=$?
   if [ $r -gt 0 ]; then
-    >&2 printf "$MPV_SOCK_OPEN failed.\n"
-    >&2 printf "1. Check that you can ssh to $PLAYER\n"
-    >&2 printf "   (name exists in ~/.ssh/config, ssh keys are distributed,\n"
-    >&2 printf "    and ssh-agent is running).\n"
-    >&2 printf "2. Check that the player app on $PLAYER\n"
-    >&2 printf "    is running mpv with --input-ipc-server=/tmp/mpvsocket.\n"
+    >2 printf "$MPV_SOCK_OPEN failed.\n"
+    >2 printf "1. Check that you can ssh to $PLAYER\n"
+    >2 printf "   (name exists in ~/.ssh/config, ssh keys are distributed,\n"
+    >2 printf "    and ssh-agent is running).\n"
+    >2 printf "2. Check that the player app on $PLAYER\n"
+    >2 printf "    is running mpv with --input-ipc-server=/tmp/mpvsocket.\n"
     return 1
   fi
-  echo "Running $MPV_GET_PLAYING_FILE on $PLAYER"
+  se "Running $MPV_GET_PLAYING_FILE on $PLAYER"
   r_cmd="ssh $PLAYER $MPV_GET_PLAYING_FILE"
   filepath="$($r_cmd)"
   if [ $? -gt 0 ]; then
-    >&2 printf "Non-zero exit status for:\n"
-    >&2 printf "$r_cmd"
+    >2 printf "Non-zero exit status for:\n"
+    >2 printf "$r_cmd"
     return 1
   fi
-  fark "$filepath"
-  r_cmd="ssh $PLAYER $MPV_NEXT"
+  echo "${filepath}"
+  return 0
 }
+
+function rmfark() {
+  filepath=$(rmfile)
+  if [[ "$1" == "-y" ]]; then 
+    /home/mt/bin/fark -y "$filepath"
+  else
+    /home/mt/bin/fark "$filepath"
+  fi
+}
+
 
 function untriage() {
   if [ -n "$2" ]; then
@@ -174,7 +176,7 @@ complete -F untriage "$VIDTRIAGE"
 #
 # tiny helper wrapper around ffmpeg to boost the amplitude of a video file
 #
-function audio-boost () {
+function audio_boost () {
   # handle args ()
   db=0
   while [ $# -gt 0 ]; do
@@ -222,12 +224,16 @@ function audio-boost () {
     echo "Boosted $bn by $db db, saved  in $path.  Check the original in /tmp"
     echo "before rebooting if you think there were any re-encoding problems."
   else
-    >&2 printf "Something went wrong trying to boost with ffmpeg.\n"
+    >2 printf "Something went wrong trying to boost with ffmpeg.\n"
     return 1;
   fi
 }
-complete -F audio-boost "$VIDTRIAGE"
 
+function rmaudio_boost() {
+  fpath=$(rmfile)
+  fpath=$(sanitize_fpath "${fpath}")
+  audio_boost -f "${fpath}"
+}
 
 function vtrim() {
   ltrim=0
@@ -280,7 +286,7 @@ function vtrim() {
     mv "$filename" /tmp/
     attempt=$(ffmpeg -i "/tmp/$filename" -ss $ltrim -acodec copy "$dir/$filename"|pv)
     if ! [ $? -eq 0 ]; then
-      >&2 printf "Something went wrong trying to left trim $filename. exiting.\n"
+      >2 printf "Something went wrong trying to left trim $filename. exiting.\n"
       return 1
     fi
   fi
@@ -291,7 +297,7 @@ function vtrim() {
     mv "$filename" /tmp/
     attempt=$(ffmpeg -i "/tmp/$filename" -t $rtrim -vcodec libx264 0 -acodec copy "$dir/$filename"|pv)
     if ! [ $? -eq 0 ]; then
-      >&2 printf "Something went wrong trying to left trim $filename. exiting.\n"
+      >2 printf "Something went wrong trying to left trim $filename. exiting.\n"
       return 1
     fi
   fi
@@ -394,7 +400,7 @@ function yt () {
 
   out=$(ytd "$url"|grep "Adding thumbnail to")
   if ! [ $? -ne 0 ]; then
-    >&2 printf "Something went wrong calling yt-dlp.\n"
+    >2 printf "Something went wrong calling yt-dlp.\n"
     return 1;
   fi
 
@@ -402,9 +408,9 @@ function yt () {
 
   if [ $DB -ne 0 ]; then
     echo "trying to boost audio on $out by 50dB,"
-    attempt=$(audio-boost "$filename");
+    attempt=$(audio_boost "$filename");
     if ! [ $? -eq 0 ]; then
-      >&2 printf "Something went wrong trying to boost the audio of $filename. Exiting.\n"
+      >2 printf "Something went wrong trying to boost the audio of $filename. Exiting.\n"
       return 1
     fi
   fi
