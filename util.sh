@@ -25,25 +25,30 @@
 #
 # May have dependencies on dots/.bashrc and dots/.bash_profile
 
+if [ -z $D ]; then 
+  D="$HOME/src/github/dots"
+fi
 
-source $D/user_prompts.sh
+if ! declare -F "confirm_yes" > /dev/null 2>&1; then
+  source "$D/user_prompts.sh"
+fi
 
-# modification of https://stackoverflow.com/questions/229551/how-to-check-if-a-string-contains-a-substring-in-bash
-function string_contains() { 
-        $(echo "$2"|grep -Eqi $1);
-        return $?;
-}
-export -f string_contains
+if ! declare -F "string_contains" > /dev/null 2>&1; then
+  source "$D/util.sh"
+fi
 
 function sync_music () {
-    for pathel in $(echo $MBKS| tr ":" "\n"); do
-      synced="$(rsync -rlutv --delete $MUSICLIB $pathel);"
-      if [ $? -eq 0 ]; then
-        echo "Synced $pathel"
-      else
-        echo "Something went wrong syncing $pathel"
-      fi
-    done;
+  failures=0
+  for pathel in $(echo $MBKS| tr ":" "\n"); do
+    synced="$(rsync -rlutv --delete $MUSICLIB $pathel);"
+    if [ $? -eq 0 ]; then
+      echo "Synced $pathel"
+    else
+      echo "Something went wrong syncing $pathel"
+      ((failures++))
+    fi
+  done;
+  return $failures
 }
 export -f sync_music
 
@@ -86,23 +91,146 @@ NEXT_IPC_JSON="playlist-next"
 MPV_SOCK_CMD="echo '%s'|socat - $SOCK|jq .data"
 MPV_GET_PLAYING_FILE=$(printf "$MPV_SOCK_CMD" "${PLAYING_FILE_IPC_JSON}")
 MPV_NEXT=$(printf "$MPV_SOCK_CMD" "${NEXT_IPC_JSON}")
+URLREGEX='https.*' #?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})'
+
+ytopts=("-q" "--progress" "--newline" "--progress-delta" "2")
+
+# silly little progress bar example
+declare -x BAR_SIZE="##################"
+declare -x CLEAR_LINE="\\033[K"
+progress() {
+  # heavily cribbed from 
+  # https://github.com/lnfnunes/bash-progress-indicator/blob/master/progress.sh
+  finished="${1:-}"
+  total="${2:-}"
+  message="${3:-}"
+  local MAX_STEPS=$total
+  local MAX_BAR_SIZE="${#BAR_SIZE}"
+  perc=$(($finished * 100 / MAX_STEPS))
+  percBar=$((perc * MAX_BAR_SIZE / 100))
+  echo -ne "\\r[${BAR_SIZE:0:percBar}] $perc %  $message - Plugin $finished / $total $CLEAR_LINE"
+}
+
+# wrapper for yt-dlp for my Silly little progress bar example
+ytprog() {
+  echo -ne "\\r[${BAR_SIZE:0:0}] 0 %$CLEAR_LINE"
+  url="${@: -1}"
+  name=$(echo "$url" | awk -F'/' '{print$NF}')
+  pref="${name:0:5}..."
+  yt-dlp $@ 2>&1 | 
+    while IFS=$'\n' read -r line; do
+      finishedp=$(echo "$line"|awk '{print$2}')
+      if is_int "${finishedp::-3}"; then 
+        finished="${finishedp::-3}"
+
+        progress "$finished" "100" "dling $pref"
+      else
+        echo "$finishedp"
+      fi
+    done
+}
+
+# for the truly lazy among us who'd like to type as few chars as possible
+alias y="yt-dlp -j -q --progress "
+function yc() {
+  log="/tmp/yc.log"
+  a=()
+  c=
+  p=
+  c="$(xclip -o -se c)"
+  p="$(xclip -o -se p)"
+  a=( "$c" "$p" )
+  if [[ "$c" == "$p" ]]; then 
+    echo "c: $c"
+    ytprog ${ytopts[@]} "$c"
+    if [ $? -eq 0 ]; then 
+      echo "$c" >> "$log"
+      return 0
+    fi
+  else
+    for i in "${a[@]}"; do 
+      echo "$i"
+      echo "$i" | grep "$URLREGEX" > /dev/null 2>&1
+      if [ $? -eq 0 ]; then 
+        grep "$i" "$log"
+        if [ $? -gt 0 ]; then 
+          ytprog ${ytopts[@]} "$i"
+          if [ $? -eq 0 ]; then 
+            echo "$i" >> "$log"
+            return 0
+          fi   
+        else
+          "$i in yc.log"
+        fi
+      fi
+    done
+  fi    
+  return 1
+}
 
 # rmfark should run properly when run from the player
 # host as well as from a remote host.  If this is the player
 # host, we simplify.
+# this function may not be needed any longer
 function rmfark_local() {
-  lsof -c mpv|grep /tmp/mpvsocket
-
-  if [[ $? -gt 0 ]]; then
-    >2 printf "mpv not listening on $SOCK."
-    >2 printf "make sure it was started with"
-    >2 printf "--input-ipc-server=/tmp/mpvsocket"
-    return 1
-  fi
-  filepath=$(echo '"{ \"command\": [\"get_property\", \"path\"] }"'|socat - /tmp/mpvsocket|jq .data)
+  filepath=$(smurl)
   
   fark "$filepath"
   return $? 
+}
+
+# temporary 20241109 delete or formalize when finished
+source ~/.local_lhrc
+sp="vlc"
+
+function siurl() {
+  url=$(playerctl --player="$sp" metadata |grep ':url' | awk '{$1=$2=""; print $0}' |sed "s@file://@@")
+  echo $(urldecode "$url")
+}
+
+function smurl() {
+  url=$(playerctl --player="smplayer" metadata |grep ':url' | awk '{$1=$2=""; print $0}' |sed "s@file://@@")
+  echo $(urldecode "$url")
+}
+
+# actually do what rmfark_local was intended to do, but 
+# supporting multiple players and prompting if needed
+function lfark() {
+  declare -a players
+  declare -ga titles
+  declare -a urls
+  players=()
+  titles=()
+  urls=()
+  echo "If there is playing media, you'll see it below..."
+  echo
+  indexplus1=0
+  for player in $(playerctl --list-all); do 
+    ((indexplus1++))
+    status=$(playerctl --player="$player" status)
+    if [[ "$status" == "Playing" ]]; then 
+      players+=( "$player" )
+      url=$(playerctl --player="$player" metadata |grep url | awk '{$1=$2=""; print $0}' | xargs |sed "s@file://@@")
+      urls+=( "$url" )
+      # most videos will have a title
+      titleline=$(playerctl --player="$player" metadata |grep title)
+      if [ $? -gt 0 ]; then 
+        # when there's no title, we'll grab the filename from the url
+        title=$(basename "$url")
+      else 
+        title=$(echo "$titleline" |awk '{$1=$2=""; print $0}' | xargs)
+      fi
+      titles+=( "$title" )
+    fi
+    echo " $indexplus1. [$player] $title"
+  done
+  echo
+  choice=$(get_keypress "Enter the number of the media file you'd like to archive: ")
+  idx_to_del=$(($choice-1))
+  fark "${urls[$idx_to_del]}"
+  if [ $? -eq 0 ]; then 
+    playerctl --player="${players[$idx_to_del]}" next
+  fi
 }
 
 # Run fark remotely to archive the currently playing video.
@@ -114,23 +242,24 @@ function rmfark_local() {
 #     --input-ipc-server=/tmp/mpvsocket. Defaults to
 #     $DEFAULT_PLAYER. Host access relies on ssh keys. 
 function rmfile() {
+  SSH=$(type -p ssh)
   remote=false
   if [ -n "$1" ]; then 
     PLAYER=$1
   else
     PLAYER=$DEFAULT_PLAYER
   fi
-  if [[ "$PLAYER" == "$(hostname)" ]]; then 
-    run="$(rmfark_local)"
-    if [ $? -gt 0 ]; then
-      >2 printf "rmfark_local failed"
-      return 1
-    fi
-    return 0
-  fi
-  env_chk="ssh $PLAYER $MPV_SOCK_OPEN"
-  se "running $env_chk on $PLAYER"
-  env_ok=$($env_chk)
+  # if [[ "$PLAYER" == "$(hostname)" ]]; then 
+  #   rmfark_local
+  #   if [ $? -gt 0 ]; then
+  #     se "rmfark_local failed"
+  #     return 1
+  #   fi
+  #   return 0
+  # fi
+  env_chk_ssh_args=( "$PLAYER" "$MPV_SOCK_OPEN" )
+  se "sshing using ${env_chk_ssh_args[@]} on $PLAYER"
+  "$SSH" "${env_chk_ssh_args[@]}"
   r=$?
   if [ $r -gt 0 ]; then
     >2 printf "$MPV_SOCK_OPEN failed.\n"
@@ -142,7 +271,7 @@ function rmfile() {
     return 1
   fi
   se "Running $MPV_GET_PLAYING_FILE on $PLAYER"
-  r_cmd="ssh $PLAYER $MPV_GET_PLAYING_FILE"
+  r_cmd="$SSH $PLAYER $MPV_GET_PLAYING_FILE"
   filepath="$($r_cmd)"
   if [ $? -gt 0 ]; then
     >2 printf "Non-zero exit status for:\n"
@@ -154,7 +283,36 @@ function rmfile() {
 }
 
 function rmfark() {
-  filepath=$(rmfile)
+  local farkargs=()
+  optspec="yud:"
+  while getopts "${optspec}" optchar; do
+    case "${optchar}" in
+      y)
+        farkargs+=( "-y" )
+        ;;
+      u)
+        farkargs+=( "-u" )
+        ;;
+      d)
+        path="${OPTARG}"
+        if [ -n "$path" ]; then 
+          farkargs+=( "-d" )
+          farkargs+=( "$path" )
+        fi
+        ;;
+      *)
+        help
+        ;;
+    esac
+  done
+  # this dpath shouldn't really exist
+  host="${@:$OPTIND:1}"
+  if [ -n "$dpath" ]; then
+    echo "pathtosource normally not applied to rmfark"
+    echo "instead its purpose is to pull the filname"
+    echo "from the player host"
+  fi
+  filepath=$(rmfile "$host")
   if [[ "$1" == "-y" ]]; then 
     /home/mt/bin/fark -y "$filepath"
   else
@@ -178,11 +336,16 @@ complete -F untriage "$VIDTRIAGE"
 #
 function audio_boost () {
   # handle args ()
-  db=0
+  db=10
+  normalize=false
   while [ $# -gt 0 ]; do
     case "$1" in
       --decibels|-d)
         db=${2:-}
+        shift
+        ;;
+      --normalize|-n)
+        normalize=true
         shift
         ;;
       --file|-f)
@@ -190,9 +353,10 @@ function audio_boost () {
         shift
         ;;
       --help|-h)
-        printf "Boosts the audio of a video file by \$DB db (default 20)" # Flag argument
+        printf "Boosts the audio of a video file by \$db db (default 10)" # Flag argument
         printf "File supplied by -f, OR only arg on the command line OR clipboad."
         printf "Amplitude boost can be overridden with -d or --decibels."
+        printf "Or use -n to normalize, if -n supplied, -d is ignored."
         exit 0
         ;;
       *)
@@ -205,23 +369,50 @@ function audio_boost () {
 
   if  ! [ -n "$file" ]; then
     # no filepath supplied, try the clipboard
-    file="`xclip -out`"
+    file="$(xclip -out)"
   fi
   # not all of these will be used, but chopping it explicitly for
   # readability, because my brain cannot be trusted.
-  if [ $db -eq  0 ]; then
-    db=20
-  fi
   bn=$(basename "$file");
   path=$(dirname "$file");
-  db_string="$db"dB
   mv "$file" /tmp
-  bn=$(printf '%q' "$bn")
-  ffmpeg_cmd="ffmpeg -i /tmp/$bn -vcodec copy -af \"volume=$db_string\" $bn"
-  printf "running  $ffmpeg_cmd"
-  boost=$($ffmpeg_cmd)
+  #bn=$(printf '%q' "$bn")
+  if $normalize; then 
+    if ! type -p pipx > /dev/null 2>&1; then 
+      echo "to normalize, ffmpeg-normalize should be installed from pipx"
+      echo "but pipx doesn't seem to be installed... attempt to install?"
+      if confirm_yes; then 
+        install_util_load
+        if ! sai pipx; then 
+          echo "install failed, install pipx to continue, or use -d to change"
+          echo "volume level by db"
+          return 2
+        fi
+      else
+        echo "install pipx to normalize, or use -d to change by db"
+        return 1
+      fi
+    fi
+    pipx list|grep ffmpeg-normalize > /dev/null 2>&1 
+    if [ $? -gt 0 ]; then 
+      if ! pipx install ffpeg-normalize; then 
+        echo "pipx install ffmpeg-normalize failed.  Install ffmpeg-normalize"
+        echo "to continue with -n or use -d to adjust by db."
+        return 3
+      fi
+    fi
+    ffmpeg_args=("/tmp/$bn" "--progress" "-c:a" "mp3" -o "$path/$bn")
+    ffmpeg="ffmpeg-normalize"
+    success_string="Normalized $bn, saved in $path."
+  else
+    ffmpeg_args=("-i" "/tmp/$bn" "-filter:a" "volume=10dB" "$path/$bn") 
+    ffmpeg="ffmpeg"
+    success_string="Boosted $bn by $db db, saved  in $path."
+  fi
+  echo "running $ffmpeg ${ffmpeg_args[@]}"
+  nice -n 2 $ffmpeg ${ffmpeg_args[@]}
   if [ $? -eq 0 ]; then
-    echo "Boosted $bn by $db db, saved  in $path.  Check the original in /tmp"
+    echo "$success_string Check the original in /tmp"
     echo "before rebooting if you think there were any re-encoding problems."
   else
     >2 printf "Something went wrong trying to boost with ffmpeg.\n"
@@ -306,15 +497,15 @@ export -f vtrim
 
 # Some wrappers around the wonderful yt-dlp... an alias just to capture the 
 # options I like to use but don't love to type.
-function ytd () { 
+function ytd () {  
+  echo "running with $@"
   /usr/local/bin/yt-dlp \
     --restrict-filenames \
     --windows-filenames \
     --trim-filenames 40 \
     --no-mtime \
     --legacy-server-connect \
-    --embed-thumbnail 
-  $@
+    --embed-thumbnail $@
 }
 export -f ytd
 
@@ -370,8 +561,8 @@ function yt () {
         echo "(you have to supply the url)"
         echo ""
         echo "but you get extra arguments in return:"
-        echo "-a, --audio-boost \$DB -- boost audio in the downloaded video by how many db, default 50"
-        echo "-l, --left-trim \$secs -- trim the beginning of the video by X secs"
+        echo "-a, --audio-boost \$DB -- bo
+m the beginning of the video by X secs"
         echo "-r, --right-trim \$secs -- trim the end of the video by X secs."
         echo "-h, --help -- this friendly help text."
         shift # past argument
@@ -389,10 +580,10 @@ function yt () {
   done
 
   set -- "${POSITIONAL_ARGS[@]}" # restore positional parameters
-
-  if [ $# -eq 0 ]; then
+  echo "num $# arr $@ pa ${POSITIONAL_ARGS[@]}"
+  if [ -z "${POSITIONAL_ARGS[*]}" ]; then
   # no filepath supplied, try the clipboard
-    url="`xclip -out`"
+    url="$(xclip -o)"
   else
     url="$1"  
   fi
