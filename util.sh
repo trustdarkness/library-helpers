@@ -116,7 +116,7 @@ _log() {
     "$src" 
   (
     mkdir -p "$LH_LOGHOME"
-    this_level=$(stripc "$level")
+    this_level=$(striplevel "$level")
     if to_echo $this_level $LEVEL; then 
       #exec 3>&1 
       # remove coloring when going to logfile 
@@ -438,22 +438,6 @@ EOF
   return ${#failures[@]}
 }
 
-
-
-# global options to interact with mpv via unix sockets when started with
-# --input-ipc-server=/tmp/mpvsockets/main
-# setting up for archiving playing file as wrapper functions around fark
-# TODO: allow for more generic player interaction locally and remotely
-# SOCK="/tmp/mpvsockets/main"
-# MPV_SOCK_OPEN="lsof -c mpv|grep $SOCK"
-# MPV_GET_PROP="get_property"
-# MPV_PATH_PROP="path"
-# PLAYING_FILE_IPC_JSON="{ \"command\": [\"$MPV_GET_PROP\", \"$MPV_PATH_PROP\"] }"
-# NEXT_IPC_JSON="playlist-next"
-# MPV_SOCK_CMD="echo '%s'|socat - $SOCK|jq .data"
-# MPV_GET_PLAYING_FILE=$(printf "$MPV_SOCK_CMD" "${PLAYING_FILE_IPC_JSON}")
-# MPV_NEXT=$(printf "$MPV_SOCK_CMD" "${NEXT_IPC_JSON}")
-# URLREGEX='https.*' #?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})'
 
 ############################### VLC IPC Remote Control
 ######################################################
