@@ -1,2 +1,0 @@
-#!/bin/bash
-fark.sh $HOME/$TARGET/$VIDLIB/$PHOTOLIB/pa/$1

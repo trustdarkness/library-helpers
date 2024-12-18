@@ -1,11 +1,13 @@
 #!/bin/bash
 #
+# setup environment
 source $HOME/.globals
 source $D/util.sh
+sosutil
 source $LH/util.sh
 source $D/user_prompts.sh
-fark_noninteractive=false
-DEBUG=false
+
+SHASUM="/opt/bin/shasum"
 
 # temporary 2024-11 during data recovery
 container="/run/media/mt/BB"
@@ -13,19 +15,48 @@ tempvidlib="mmzz"
 cache="/CityInFlames"
 photoname="fodder"
 
-HISTORY="/$container/$tempvidlib/$VIDLIB/.archive_history"
-HISTORY_TS_FMT="%Y%m%d_%H%M%S"
+export HISTORY="/$container/$tempvidlib/$VIDLIB/.archive_history"
 
 if ! declare -F "tru" > /dev/null 2>&1; then 
   source "$D/existence.sh"
 fi
 
+# Keep a record of each archive we make.  This enables multi level
+# undo and search across multiple archive locations.
+#
+# Positional Args:
+#   Arg1 - original file path
+#   Arg2 - archived file path
+#
+# Returns 0 on success
+# 2 if could not hash the media file
+# 3 if paths aren't setup properly
+# 100 if archive history file did not exist and, open prompting to 
+#     create it the user said no
+# 1 otherwise
 function record_archive_history() {
   local fpath="${1:-}"
   local apath="${2:-}"
-  local ts=$(date +$HISTORY_TS_FMT)
-  local hash=$(shasum -a 256 < "${fpath}")
-  local filename=$(basename "${fpath}")
+  local ts=$(fsts)
+  local hash
+  if ! hash=$($SHASUM -a 256 < "${fpath}"); ret=$?; then 
+    error "error $ret could not hash archive history item ${fpath}"
+    return 2
+  fi
+  if [ -d dn=$(dirname "$HISTORY") ]; then 
+    if ! [ -f "$HISTORY" ]; then 
+      echo "no history file present at $HISTORY, start one?"
+      if confirm_yes; then 
+        touch "$HISTORY"
+      else 
+        return 100
+      fi
+    fi
+  else
+    error "parent dir $dn for HISTORY does not exist, check globals"
+    error "before continuing."
+    return 3
+  fi
   args=( 
     "${ts}"  
     "${fpath}" 
@@ -34,14 +65,28 @@ function record_archive_history() {
     "${hash}"
   )
   printf -v entry "%s\t" "${args[@]}"
-  echo "${entry}" >> "$HISTORY"
+  if echo "${entry}" >> "$HISTORY"; then 
+    return 0
+  fi
+  return 1
 }
 
+# Returns an archived media back to its original file location
+# using the archive history file.  Respects the -y flag, i.e.
+# non-interactive or quiet, otherwise prompts the user for confirmation.
+# When in non-interactive mode, reports status through notify-send
+# if available, otherwise status to console.
+# 
+# On success, removes the undone archive from the archive history file
+# and exits 0, otherwise exists 1
 function undo_archive() {
-  reverse_fpath=$(tail -n 1 "${HISTORY}" |awk '{print$2}')
-  reverse_apath=$(tail -n 1 "${HISTORY}" |awk '{print$4}')
-  
-  
+  reverse_fpath_line=$(tail -n 1 "${HISTORY}" |awk -F '>' '{print$1}')
+  reverse_fpath="${reverse_fpath_line:16:-2}"
+  reverse_apath_line=$(tail -n 1 "${HISTORY}" |awk -F'>' '{print$2}')
+  reverse_apath=$(echo "$reverse_apath_line"|awk '{print$1}') # may be brittle if
+                                                            # we have spaces in 
+                                                            # paths, but i dont 
+                                                            # think we do
   if tru $fark_noninteractive; then
     local echo="notify-send fark-undo"
   else 
@@ -60,13 +105,33 @@ function undo_archive() {
   
   if cp -r "${fpath}" "${apath}"; then
     sed -i '$ d' "${HISTORY}"
+    rm -rf "${fpath}"
     exit 0
   fi
   exit 1
 }
 
+# Archives the currently playing or showing media from a number
+# of possible players and galleries on localhost or a remote host
+# 
+# Args:
+#  -y: non-interactive or quiet mode, don't prompt the user, assume
+#      answers to questions are "yes." don't treat console as interactive
+#  -u: undo the last archive
+#  -g: special mode for headless geeqie, picks the filename up from 
+#      the gallery
+#  -r: attempts to resume then the file was taken from a running player
+#      or slideshow.  -r takes the app to resume as an arg
+#  -d: destination, if other than the default for the media type
+#
+# Positional Args: the file to be archived
 function main() {
   fark_noninteractive=false
+  DEBUG=false
+
+  # to report on timing events with returns, we start a second counter
+  start=$SECONDS
+
   args=("$@")
   # for players that fark is hooked into, try to resume/advance
   # on success (currently only geeqie)
@@ -97,9 +162,13 @@ function main() {
         ;;
       *)
         help
+        return 1
         ;;
     esac
   done
+
+  # print wrappers, if we're interactive, we print to the shell
+  # otherwise we use notify-send
   if $fark_noninteractive; then 
     function p() {
       subject="${1:-}"
@@ -113,36 +182,47 @@ function main() {
       printf "%15s: %s" "$subject" "$msg"
     }
   fi
-  dpath="${@:$OPTIND:1}"
-  if [ -z "$dpath" ]; then
+
+  # if we didn't recieve a filename on the shell, we will try to pick it 
+  # up off the clipboard.  this hasn't been used in awhile
+  fpath="${@:$OPTIND:1}"
+  if [ -z "$fpath" ] && $geeqie; then 
+      fpath=$(geeqie --remote --tell)
+  elif [ -z "$fpath" ]; then 
     # no filepath supplied, try the clipboard
-    dpath="$(xclip -out | xargs)"
+    fpath="$(xclip -out | xargs)"
     if [ $? -gt 0 ] || [ -z "$dpath" ]; then
       >2 printf "No filename provided and nothing on the clipboard.  Exiting."
       exit 1;
     fi
   fi
+
+  # When running on a remote host, the path needs to be coerced, 
+  # this is currently unused and disbled, but left here for possible 
+  # future use.
+  #
   # echo "is there quotes? $fpath"
   #fpath="$(echo \"$fpath\"|xargs|awk '{"$1"="$1"};1')"
   # prestrip="$(echo $fpath| grep 'file://')";
   # if [ $? -eq 0 ]; then
   #   fpath="$(echo $fpath|cut -d':' -f2|cut -b3-)"
   # fi
-  oldfpath="${dpath}"
-  fpath=$(sanitize_fpath "${dpath}")
-  if "$DEBUG"; then 
-    se "sanitized fpath: ${fpath}"
-  fi
+  # oldfpath="${dpath}"
+  # fpath=$(sanitize_fpath "${dpath}")
+  # if "$DEBUG"; then 
+  #   se "sanitized fpath: ${fpath}"
+  # fi
+
+  # bail if no file
   if ! [ -f "${fpath}" ]; then
-    if $geeqie; then 
-      fpath=$(geeqie --remote --tell)
-    else
       p "could not fark" "no file found at ${fpath}\n invoked as fark ${args[@]}"
       exit 1
-    fi
   fi
   echo
-  # 2024-11
+  
+  # 2024-11 - catastrophic data loss during a move meant path changes
+  # and some special handling, called out with the date comment.  Maybe
+  # someday we'll get to fix.  Special handling for geeqie slideshow.
   echo $fpath|grep $photoname
   if [ $? -eq 0 ]; then
     isimage=true
@@ -150,16 +230,23 @@ function main() {
   else
     isimage=false
   fi
+
+  # detect if we're working on a music file and flag
   echo $fpath|grep $MUSICLIB
   if [ $? -eq 0 ]; then
     ismusic=true
   else
     ismusic=false
   fi
+
+  # media types get their own archive locatiouns
   if $isimage; then
     # 2024-11
     # apath="$HOME/$TARGET/$VIDLIB/$PHOTOLIB/archive"
     apath="$PHOTOLIB/archive"
+
+  # for music, the provided argument may have been a song, an
+  # album, or an artist.  we try to recursively archive as appropriate
   elif $ismusic; then
     ctr=1
     IFS=$'\n' 
@@ -181,7 +268,7 @@ function main() {
         albumname="$pathel"
       fi
       lastpathel=$pathel
-      ((ctr=$ctr+1))
+      ((ctr++))
     done
     apath=$MARCH
     if ! [ -z "${artistname+x}" ]; then
@@ -198,6 +285,9 @@ function main() {
       fi
     fi 
 
+  # commented lines would have been more path coercion for 
+  # running on a remote host that has this host's filesystem
+  # mounted.  currently disabled.
   else
     if string_contains "local" "$oldfpath"; then
       # if string_contains "$VIDLIB" "$fpath"; then
@@ -210,6 +300,7 @@ function main() {
       # apath="$HOME/$TARGET/$VIDLIB/$VIDLIB/ARCHIVE/"
       apath="/$container/$tempvidlib/$VIDLIB/ARCHIVE"
     else
+      # category based archives
       ispno=$(echo "$fpath"|grep pno);
       if [ $? -eq 0 ]; then 
         # 2024-11
@@ -228,8 +319,10 @@ function main() {
     sedstring='s/"//g'
     fpath="$(echo $fpath|sed -e $sedstring)"
   fi
-  if ! [ -n "$fpath" ]; then 
-  se f
+
+  # we've done a bunch of string and path manipulation, let's sanity
+  # check that we have a source (fpath) and destination (apath) still.
+  if [ -z "$fpath" ]; then 
     fready=false
   else
     if [ -f "${fpath}" ]; then 
@@ -237,14 +330,15 @@ function main() {
     fi
   fi
 
-  if ! [ -n "$apath" ]; then
-  se a 
+  if [ -z "$apath" ]; then
     aready=false
   else
     if [ -d "${apath}" ]; then
       aready=true # maybe
     fi
   fi
+
+  # if user supplied a destination with -d, apply it now
   if exists "destination" && [ -d "$destination" ]; then
     apath="$destination"
   fi
@@ -260,9 +354,7 @@ function main() {
       exit 1
     fi
     echo
-  # else
-  #   ns_sub="fark -y"
-  #   ns_msg="Archiving $fpath to $apath"
+
   fi
   # 2024-11
   # mounted=$(mountpoint $HOME/$TARGET);
@@ -274,11 +366,17 @@ function main() {
     p "Could not fark" "Couldnt mkdir -p $apath\ninvoked as fark ${args[@]}"
     exit 1;
   fi
-  bn=$(basename "$fpath")
+  donef=$(( SECONDS - start ))
+  bn="$(basename "$fpath") in $donef s."
   record_archive_history "${fpath}" "${apath}"
+
+  # all that fuss for this little copy command
   cp -fr "$fpath" "$apath"
   if [ $? -eq 0 ]; then
     rm -rf "$fpath"
+
+    # if this was music we sync changes to our backup archive
+    # so it catches the deletes
     if $ismusic; then
       p "farked $bn" "Archived $fpath to $apath\nsyncing music."
       out=$(sync_music)
@@ -289,8 +387,11 @@ function main() {
       else
         exit 0
       fi
+
+    # again for images, sync deletes to a backup library, and try to resume
     elif $isimage; then 
-      p "farked $bn" "Archived $fpath to $apath\nsyncing images."
+      donei=$(( SECONDS - start ))
+      p "farked $bn" "Archived $fpath to $apath\nsyncing images.\n$donei s."
       # 2024-11
       # synced="$(rsync -rltuv --delete $HOME/$TARGET/$VIDLIB/$PHOTOLIB $HOME/Pictures/);"
       out="$(rsync -rltuv --delete "$PHOTOLIB/"* $cache/$tempvidlib/$photoname/);"
@@ -308,26 +409,29 @@ function main() {
         exit $ret
       fi
     else
-      p "farked $bn" "Archived $fpath to $apath"
+
+      # otherwise report status and if -r resume
+      donee=$(( SECONDS - start ))
+      p "farked $bn" "Archived $fpath to $apath. $donee s."
       if $resume; then 
         playerctl -p "$player" next
       fi
       exit 0
     fi
   else
+
+    # if this file was already archived, it should probably be removed
+    # TODO: investigate why or why not
     bn=$(basename "$fpath")
     farked="$apath"/"$bn"
     if [ -f "$farked" ]; then
       msg="$bn was previously archived and exists at $apath. exiting.\n"
-    
-      geeqie --remote --slideshow-start
-      geeqie --remote --raise
     fi
     if [ -z "$msg" ]; then
       msg="something went wrong during archive"
     fi
     if untru $fark_noninteractive; then 
-      >2  printf "$msg"
+      >2 printf "$msg"
     else
       ns_msg+="\n$msg"
       p "$ns_sub" "$ns_msg"
@@ -337,11 +441,6 @@ function main() {
 }
 
 #  from https://stackoverflow.com/questions/2683279/how-to-detect-if-a-script-is-being-sourced
-# As $_ could be used only once, uncomment one of two following lines
-
-# printf '_="%s", 0="%s" and BASH_SOURCE="%s"\n' "$_" "$0" "$BASH_SOURCE" 
-[[ "$_" != "$0" ]] && DW_PURPOSE=sourced || DW_PURPOSE=subshell
-
 [ "$0" = "$BASH_SOURCE" ] && BASH_KIND_ENV=own || BASH_KIND_ENV=sourced; 
 if tru $DEBUG; then
   se "proc: $$[ppid:$PPID] is $BASH_KIND_ENV (DW purpose: $DW_PURPOSE)"

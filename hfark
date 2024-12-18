@@ -1,3 +1,0 @@
-#!/bin/bash
-h=$HOME/$TARGET/$VIDLIB/$PHOTOLIB/hy
-fark.sh "$h/$1"
