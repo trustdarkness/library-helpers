@@ -15,7 +15,7 @@ tempvidlib="mmzz"
 cache="/CityInFlames"
 photoname="fodder"
 
-export HISTORY="/$container/$tempvidlib/$VIDLIB/.archive_history"
+HISTORY="/$container/$tempvidlib/$VIDLIB/.archive_history"
 
 if ! declare -F "tru" > /dev/null 2>&1; then 
   source "$D/existence.sh"
